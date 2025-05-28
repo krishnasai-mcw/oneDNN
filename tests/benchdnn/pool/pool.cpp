@@ -112,7 +112,7 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
     auto src_d = dnn_mem_t::init_md(prb->ndims, prb->src_dims().data(),
             force_f32_dt ? dnnl_f32 : prb->src_dt(), src_tag);
     auto dst_d = dnn_mem_t::init_md(prb->ndims, prb->dst_dims().data(),
-            force_f32_dt ? dnnl_f32 : prb->dst_dt(), tag::any);
+            force_f32_dt ? dnnl_f32 : prb->dst_dt(), src_tag);
 
     attr_args_t attr_args;
     attr_args.prepare_post_ops_mds(
