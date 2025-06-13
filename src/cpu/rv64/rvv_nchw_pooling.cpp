@@ -45,7 +45,8 @@ void MaxPooling(const float *src, float *dst, const dim_t batch,
                                 + (size_t)outW * outH * outD * c
                                 + (size_t)outW * outH * od + (size_t)outW * oh
                                 + (size_t)ow;
-                        const auto src_offset = ((size_t)inW * inH * inD)
+
+                        const auto src_offset = (size_t)inW * inH * inD
                                 * ((size_t)channels * mb + c);
                         const auto local_src = &src[src_offset];
                         const auto IWH = (size_t)inW * inH;
@@ -53,23 +54,38 @@ void MaxPooling(const float *src, float *dst, const dim_t batch,
                         int od_offset = od * strideD - padFront;
                         int oh_offset = oh * strideH - padTop;
                         int ow_offset = ow * strideW - padLeft;
-                        size_t size = std::min(ow_offset + kerW, inW)
-                                - std::max(ow_offset, 0);
+
+                        int iw_start = std::max(ow_offset, 0);
+                        int iw_end = std::min(ow_offset + (int)kerW, (int)inW);
+
+                        if (iw_start >= iw_end) {
+                            dst[dst_offset] = -__FLT_MAX__;
+                            continue;
+                        }
+
+                        size_t size = iw_end - iw_start;
+
                         size_t cycleLength = __riscv_vsetvl_e32m8(size);
+                        if (cycleLength == 0) {
+                            dst[dst_offset] = -__FLT_MAX__;
+                            continue;
+                        }
+
                         vfloat32m8_t vmax = __riscv_vle32_v_f32m8(
                                 &arr_flt_min[0], cycleLength);
 
                         for (int id = std::max(od_offset, 0);
-                                id < std::min(od_offset + kerD, inD); id++)
-                            for (int ih = std::max(oh_offset, 0);
-                                    ih < std::min(oh_offset + kerH, inH);
+                                id < std::min(od_offset + (int)kerD, (int)inD);
+                                id++)
+                            for (int ih = std::max(oh_offset, 0); ih
+                                    < std::min(oh_offset + (int)kerH, (int)inH);
                                     ih++) {
-                                const auto local_src_offset = IWH * id
-                                        + (size_t)inW * ih
-                                        + std::max(ow_offset, 0);
+
+                                size_t local_src_offset = IWH * id
+                                        + (size_t)inW * ih + iw_start;
 
                                 size_t iw = 0;
-                                for (; iw < size - cycleLength;
+                                for (; iw + cycleLength <= size;
                                         iw += cycleLength) {
                                     vfloat32m8_t vsrc = __riscv_vle32_v_f32m8(
                                             &local_src[local_src_offset + iw],
@@ -78,14 +94,19 @@ void MaxPooling(const float *src, float *dst, const dim_t batch,
                                             vsrc, vmax, cycleLength);
                                 }
 
-                                size_t tailLength
-                                        = __riscv_vsetvl_e32m8(size - iw);
-                                {
-                                    vfloat32m8_t vsrc = __riscv_vle32_v_f32m8(
-                                            &local_src[local_src_offset + iw],
-                                            tailLength);
-                                    vmax = __riscv_vfmax_vv_f32m8(
-                                            vsrc, vmax, tailLength);
+                                if (iw < size) {
+                                    size_t tailLength
+                                            = __riscv_vsetvl_e32m8(size - iw);
+                                    if (tailLength > 0) {
+                                        vfloat32m8_t vsrc
+                                                = __riscv_vle32_v_f32m8(
+                                                        &local_src
+                                                                [local_src_offset
+                                                                        + iw],
+                                                        tailLength);
+                                        vmax = __riscv_vfmax_vv_f32m8(
+                                                vsrc, vmax, tailLength);
+                                    }
                                 }
                             }
 
